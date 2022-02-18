@@ -95,7 +95,28 @@ func (t *grpcTunnel) serve(c clientConn) {
 	defer c.Close()
 
 	for {
-		pkt, err := t.stream.Recv()
+		done := make(chan struct{})
+		pktChan := make(chan *client.Packet, 1)
+		errChan := make(chan error, 1)
+		go func() {
+			pkt, err := t.stream.Recv()
+			pktChan <- pkt
+			errChan <- err
+			close(done)
+		}()
+
+		timer := time.NewTimer(10 * time.Second)
+		select {
+		case <-timer.C:
+			klog.Error("stream read timed out")
+			return
+		case <-done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		}
+
+		pkt, err := <-pktChan, <-errChan
 		if err == io.EOF {
 			return
 		}
